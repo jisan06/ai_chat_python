@@ -2,7 +2,7 @@
 # Python
 __pycache__/
 *.py[cod]
-.venv/
+backend/.venv/
 venv/
 
 # Secrets
