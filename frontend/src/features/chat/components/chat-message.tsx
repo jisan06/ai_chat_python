@@ -90,6 +90,25 @@ export function ChatMessage({ message }: ChatMessageProps) {
           )}
         >
           {message.content}
+          {message.isStreaming && !message.content && (
+            <span className="flex items-center gap-1.5 py-0.5 text-xs text-zinc-400 dark:text-zinc-500">
+              <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-bounce" />
+              <span
+                className="h-1.5 w-1.5 rounded-full bg-indigo-500 animate-bounce"
+                style={{ animationDelay: '150ms' }}
+              />
+              <span
+                className="h-1.5 w-1.5 rounded-full bg-violet-500 animate-bounce"
+                style={{ animationDelay: '300ms' }}
+              />
+            </span>
+          )}
+          {message.isStreaming && message.content && (
+            <span
+              className="inline-block w-1.5 h-3.5 ml-1 align-middle bg-blue-500 animate-pulse rounded-xs"
+              aria-hidden="true"
+            />
+          )}
         </div>
 
         {/* Message Meta & Action Bar */}

@@ -85,6 +85,64 @@ class ChatHistoryService:
             raise
 
     @staticmethod
+    def add_user_message(
+        db: Session,
+        conversation_id: str,
+        user_content: str,
+    ) -> Message:
+        conversation = ChatHistoryService.get_conversation(db, conversation_id)
+        if not conversation:
+            raise ValueError(f"Conversation {conversation_id} not found")
+
+        # If conversation is titled "New Chat", auto-generate a title from the first message
+        if conversation.title == "New Chat":
+            conversation.title = generate_title_from_message(user_content)
+
+        user_message = Message(
+            conversation_id=conversation_id,
+            role="user",
+            content=user_content,
+        )
+
+        conversation.updated_at = utc_now()
+
+        try:
+            db.add(user_message)
+            db.commit()
+            db.refresh(user_message)
+            return user_message
+        except Exception:
+            db.rollback()
+            raise
+
+    @staticmethod
+    def add_assistant_message(
+        db: Session,
+        conversation_id: str,
+        reply_content: str,
+    ) -> Message:
+        conversation = ChatHistoryService.get_conversation(db, conversation_id)
+        if not conversation:
+            raise ValueError(f"Conversation {conversation_id} not found")
+
+        assistant_message = Message(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=reply_content,
+        )
+
+        conversation.updated_at = utc_now()
+
+        try:
+            db.add(assistant_message)
+            db.commit()
+            db.refresh(assistant_message)
+            return assistant_message
+        except Exception:
+            db.rollback()
+            raise
+
+    @staticmethod
     def add_user_message_and_reply(
         db: Session,
         conversation_id: str,

@@ -9,6 +9,13 @@ import {
   SendMessageApiResponse,
 } from '../types/chat';
 
+export interface StreamMessageCallbacks {
+  onUserMessage?: (userMsg: MessageApiItem) => void;
+  onChunk: (chunk: string) => void;
+  onComplete: (assistantMsg: MessageApiItem) => void;
+  onError: (errorMessage: string) => void;
+}
+
 /**
  * Service to manage all HTTP interactions with the AI Chat Backend.
  */
@@ -144,7 +151,7 @@ class ChatApiService {
   }
 
   /**
-   * Send a message to an existing conversation and persist user message & assistant reply.
+   * Non-streaming: Send a message to an existing conversation and persist user message & assistant reply.
    */
   async sendMessageToConversation(
     conversationId: string,
@@ -194,6 +201,117 @@ class ChatApiService {
   }
 
   /**
+   * Streaming: Send a message and stream assistant reply chunks using Server-Sent Events (SSE).
+   */
+  async streamMessageToConversation(
+    conversationId: string,
+    message: string,
+    callbacks: StreamMessageCallbacks,
+    signal?: AbortSignal
+  ): Promise<void> {
+    const trimmed = message.trim();
+    if (!trimmed) {
+      throw {
+        message: 'Message cannot be empty.',
+        statusCode: 400,
+      } as ChatApiError;
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(
+        `${this.cleanBaseUrl}/api/conversations/${encodeURIComponent(conversationId)}/messages/stream`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'text/event-stream',
+          },
+          body: JSON.stringify({ message: trimmed }),
+          signal,
+        }
+      );
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return;
+      }
+      callbacks.onError('Unable to connect to the backend server. Please verify the service is running.');
+      return;
+    }
+
+    if (!response.ok) {
+      let errorMsg = 'Failed to stream response.';
+      try {
+        const errJson = await response.json();
+        if (errJson.detail) errorMsg = errJson.detail;
+      } catch {
+        // Fallback to formatted error
+        errorMsg = this.formatError(response, 'Failed to stream response.').message;
+      }
+      callbacks.onError(errorMsg);
+      return;
+    }
+
+    if (!response.body) {
+      callbacks.onError('Streaming response body is unavailable.');
+      return;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+
+        for (const part of parts) {
+          const lines = part.trim().split('\n');
+          let eventType = 'message';
+          let dataStr = '';
+
+          for (const line of lines) {
+            if (line.startsWith('event:')) {
+              eventType = line.slice(6).trim();
+            } else if (line.startsWith('data:')) {
+              dataStr += line.slice(5).trim();
+            }
+          }
+
+          if (!dataStr) continue;
+
+          try {
+            const parsed = JSON.parse(dataStr);
+            if (eventType === 'user_message') {
+              callbacks.onUserMessage?.(parsed as MessageApiItem);
+            } else if (eventType === 'chunk') {
+              if (parsed.chunk) {
+                callbacks.onChunk(parsed.chunk);
+              }
+            } else if (eventType === 'complete') {
+              callbacks.onComplete(parsed as MessageApiItem);
+            } else if (eventType === 'error') {
+              callbacks.onError(parsed.error || 'An error occurred during streaming.');
+            }
+          } catch {
+            // Skip invalid event chunks
+          }
+        }
+      }
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return;
+      }
+      callbacks.onError('Connection was interrupted while streaming AI response.');
+    }
+  }
+
+  /**
    * Delete a conversation by ID.
    */
   async deleteConversation(conversationId: string): Promise<void> {
@@ -219,7 +337,7 @@ class ChatApiService {
   }
 
   /**
-   * Legacy endpoint: Sends message directly to POST /api/chat.
+   * Legacy non-streaming endpoint: Sends message directly to POST /api/chat.
    */
   async sendMessage(message: string, signal?: AbortSignal): Promise<ChatResponse> {
     const trimmed = message.trim();

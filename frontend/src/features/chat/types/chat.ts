@@ -11,6 +11,7 @@ export interface ChatMessage {
   content: string;
   createdAt: Date;
   isError?: boolean;
+  isStreaming?: boolean;
 }
 
 export interface Conversation {

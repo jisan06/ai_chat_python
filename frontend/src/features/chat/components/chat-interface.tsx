@@ -112,7 +112,7 @@ export function ChatInterface() {
                     <ChatMessage key={message.id} message={message} />
                   ))}
 
-                  {isLoading && <TypingIndicator />}
+                  {isLoading && !messages.some((m) => m.isStreaming) && <TypingIndicator />}
 
                   <div ref={messagesEndRef} aria-hidden="true" />
                 </section>

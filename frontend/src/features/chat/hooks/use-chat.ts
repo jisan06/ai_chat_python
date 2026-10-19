@@ -5,6 +5,7 @@ import {
   ChatMessage,
   ChatApiError,
   Conversation,
+  MessageApiItem,
 } from '../types/chat';
 import { chatApi } from '../services/chat-api';
 import { generateId } from '@/lib/utils';
@@ -45,6 +46,13 @@ export function useChat(): UseChatReturn {
 
   const isSubmittingRef = useRef<boolean>(false);
   const isInitialMountRef = useRef<boolean>(true);
+  const activeAbortControllerRef = useRef<AbortController | null>(null);
+  const activeConversationIdRef = useRef<string | null>(null);
+
+  // Keep ref synchronized with currentConversationId state
+  useEffect(() => {
+    activeConversationIdRef.current = currentConversationId;
+  }, [currentConversationId]);
 
   const clearError = useCallback(() => {
     setError(null);
@@ -83,7 +91,17 @@ export function useChat(): UseChatReturn {
         return;
       }
 
+      // Abort any ongoing stream to avoid conversation cross-talk
+      if (activeAbortControllerRef.current) {
+        activeAbortControllerRef.current.abort();
+        activeAbortControllerRef.current = null;
+      }
+      isSubmittingRef.current = false;
+      setIsLoading(false);
+
       setCurrentConversationId(conversationId);
+      activeConversationIdRef.current = conversationId;
+
       if (typeof window !== 'undefined') {
         localStorage.setItem(STORAGE_ACTIVE_CONVERSATION_KEY, conversationId);
       }
@@ -109,7 +127,16 @@ export function useChat(): UseChatReturn {
    * Start a brand new chat (resets active conversation).
    */
   const startNewChat = useCallback(() => {
+    // Abort any ongoing stream
+    if (activeAbortControllerRef.current) {
+      activeAbortControllerRef.current.abort();
+      activeAbortControllerRef.current = null;
+    }
+    isSubmittingRef.current = false;
+    setIsLoading(false);
+
     setCurrentConversationId(null);
+    activeConversationIdRef.current = null;
     setMessages([]);
     setError(null);
     setInput('');
@@ -156,7 +183,6 @@ export function useChat(): UseChatReturn {
         if (savedActiveId && list.some((c) => c.id === savedActiveId)) {
           selectConversation(savedActiveId);
         } else if (list.length > 0) {
-          // Default to the most recent conversation if available
           selectConversation(list[0].id);
         }
       }
@@ -170,7 +196,7 @@ export function useChat(): UseChatReturn {
   }, [loadConversations, selectConversation]);
 
   /**
-   * Send a message to the active conversation (or creates one if in New Chat).
+   * Send a message to the active conversation with progressive streaming response.
    */
   const sendMessage = useCallback(
     async (customMessage?: string): Promise<void> => {
@@ -188,76 +214,143 @@ export function useChat(): UseChatReturn {
         setInput('');
       }
 
-      // Optimistic user message for immediate UI responsiveness
+      const tempUserMsgId = generateId();
+      const tempAssistantMsgId = generateId();
+
+      // Optimistic user message
       const tempUserMessage: ChatMessage = {
-        id: generateId(),
+        id: tempUserMsgId,
         role: 'user',
         content: messageText,
         createdAt: new Date(),
       };
-      setMessages((prev) => [...prev, tempUserMessage]);
+
+      // Optimistic assistant streaming placeholder
+      const tempAssistantMessage: ChatMessage = {
+        id: tempAssistantMsgId,
+        role: 'assistant',
+        content: '',
+        createdAt: new Date(),
+        isStreaming: true,
+      };
+
+      setMessages((prev) => [...prev, tempUserMessage, tempAssistantMessage]);
+
+      // Set up abort controller for client cancellation
+      const abortController = new AbortController();
+      activeAbortControllerRef.current = abortController;
 
       try {
         let targetConversationId = currentConversationId;
 
-        // If no active conversation, create one on the fly
+        // If in New Chat mode, create persistent conversation session first
         if (!targetConversationId) {
           const newConversation = await chatApi.createConversation();
           targetConversationId = newConversation.id;
           setCurrentConversationId(newConversation.id);
+          activeConversationIdRef.current = newConversation.id;
 
           if (typeof window !== 'undefined') {
             localStorage.setItem(STORAGE_ACTIVE_CONVERSATION_KEY, newConversation.id);
           }
         }
 
-        // Send message to the backend and persist both user & assistant messages
-        const response = await chatApi.sendMessageToConversation(
+        // Stream AI response chunks via SSE
+        await chatApi.streamMessageToConversation(
           targetConversationId,
-          messageText
+          messageText,
+          {
+            onUserMessage: (persistedUserMsg: MessageApiItem) => {
+              if (activeConversationIdRef.current !== targetConversationId) return;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === tempUserMsgId
+                    ? {
+                        ...m,
+                        id: persistedUserMsg.id,
+                        conversationId: persistedUserMsg.conversation_id,
+                        content: persistedUserMsg.content,
+                      }
+                    : m
+                )
+              );
+            },
+            onChunk: (chunk: string) => {
+              if (activeConversationIdRef.current !== targetConversationId) return;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === tempAssistantMsgId
+                    ? {
+                        ...m,
+                        content: m.content + chunk,
+                        isStreaming: true,
+                      }
+                    : m
+                )
+              );
+            },
+            onComplete: (persistedAssistantMsg: MessageApiItem) => {
+              if (activeConversationIdRef.current !== targetConversationId) return;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === tempAssistantMsgId
+                    ? {
+                        ...m,
+                        id: persistedAssistantMsg.id,
+                        conversationId: persistedAssistantMsg.conversation_id,
+                        content: persistedAssistantMsg.content,
+                        isStreaming: false,
+                      }
+                    : m
+                )
+              );
+              setIsLoading(false);
+              isSubmittingRef.current = false;
+              activeAbortControllerRef.current = null;
+              loadConversations();
+            },
+            onError: (errorMessage: string) => {
+              if (activeConversationIdRef.current !== targetConversationId) return;
+              setError(errorMessage);
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === tempAssistantMsgId
+                    ? {
+                        ...m,
+                        content: m.content || errorMessage,
+                        isError: true,
+                        isStreaming: false,
+                      }
+                    : m
+                )
+              );
+              setIsLoading(false);
+              isSubmittingRef.current = false;
+              activeAbortControllerRef.current = null;
+            },
+          },
+          abortController.signal
         );
-
-        // Replace optimistic message and append assistant message with authoritative DB records
-        const persistedUserMessage: ChatMessage = {
-          id: response.user_message.id,
-          conversationId: response.user_message.conversation_id,
-          role: 'user',
-          content: response.user_message.content,
-          createdAt: new Date(response.user_message.created_at),
-        };
-
-        const persistedAssistantMessage: ChatMessage = {
-          id: response.assistant_message.id,
-          conversationId: response.assistant_message.conversation_id,
-          role: 'assistant',
-          content: response.assistant_message.content,
-          createdAt: new Date(response.assistant_message.created_at),
-        };
-
-        setMessages((prev) => [
-          ...prev.filter((m) => m.id !== tempUserMessage.id),
-          persistedUserMessage,
-          persistedAssistantMessage,
-        ]);
-
-        // Refresh conversation list to capture updated title & sorting
-        await loadConversations();
       } catch (err: unknown) {
         const apiError = err as ChatApiError;
-        const errorMessage = apiError.message || 'An unexpected error occurred. Please try again.';
+        const errorMessage = apiError.message || 'An unexpected error occurred while streaming.';
         setError(errorMessage);
 
-        const errorAssistantMessage: ChatMessage = {
-          id: generateId(),
-          role: 'assistant',
-          content: errorMessage,
-          createdAt: new Date(),
-          isError: true,
-        };
-        setMessages((prev) => [...prev, errorAssistantMessage]);
-      } finally {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempAssistantMsgId
+              ? {
+                  ...m,
+                  content: m.content || errorMessage,
+                  isError: true,
+                  isStreaming: false,
+                }
+              : m
+          )
+        );
         setIsLoading(false);
         isSubmittingRef.current = false;
+        activeAbortControllerRef.current = null;
       }
     },
     [currentConversationId, input, loadConversations]
