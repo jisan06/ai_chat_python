@@ -39,7 +39,7 @@ export function ChatHeader({ onClearChat, hasMessages = false }: ChatHeaderProps
             </span>
           </div>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            Powered by Google Gemini 2.5 Flash
+            AI Chat Assistant
           </p>
         </div>
       </div>

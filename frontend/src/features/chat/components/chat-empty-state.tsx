@@ -73,7 +73,7 @@ export function ChatEmptyState({ onSelectPrompt }: ChatEmptyStateProps) {
         How can I help you today?
       </h2>
       <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400 max-w-md">
-        Start a conversation with Gemini. Ask questions, brainstorm ideas, write code, or summarize information.
+        Start a conversation with AI Chat. Ask questions, brainstorm ideas, write code, or summarize information.
       </p>
 
       {/* Suggestion Cards Grid */}

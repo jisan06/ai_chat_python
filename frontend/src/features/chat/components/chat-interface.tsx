@@ -108,10 +108,10 @@ export function ChatInterface() {
               onChange={setInput}
               onSubmit={() => sendMessage()}
               isLoading={isLoading}
-              placeholder="Ask Gemini anything... (Press Enter to send, Shift+Enter for new line)"
+              placeholder="Ask AI Chat anything... (Press Enter to send, Shift+Enter for new line)"
             />
             <p className="mt-2 text-center text-[11px] text-zinc-400 dark:text-zinc-500">
-              Gemini may produce inaccurate information about people, places, or facts.
+              AI may produce inaccurate information about people, places, or facts.
             </p>
           </div>
         </div>

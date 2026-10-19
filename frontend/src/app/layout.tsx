@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'AI Chat App | Powered by Google Gemini',
-  description: 'A modern, responsive AI chat interface connected to FastAPI and Google Gemini.',
+  title: 'AI Chat App',
+  description: 'A modern, responsive AI chat interface connected to FastAPI.',
 };
 
 export const viewport: Viewport = {

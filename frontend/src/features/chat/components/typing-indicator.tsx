@@ -6,7 +6,7 @@ export function TypingIndicator() {
   return (
     <div
       role="status"
-      aria-label="Gemini is typing"
+      aria-label="AI is typing"
       className="flex items-start gap-3 py-1 animate-fadeIn"
     >
       {/* Bot Avatar Icon */}
@@ -28,7 +28,7 @@ export function TypingIndicator() {
       {/* Typing Bubble */}
       <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-sm border border-zinc-200/80 bg-white px-4 py-3 shadow-xs dark:border-zinc-800 dark:bg-zinc-900">
         <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mr-1">
-          Gemini is thinking
+          AI is thinking
         </span>
         <span
           className="h-2 w-2 rounded-full bg-blue-500 animate-bounce"
