@@ -1,4 +1,13 @@
-import { ChatRequest, ChatResponse, ChatApiError } from '../types/chat';
+import {
+  ChatRequest,
+  ChatResponse,
+  ChatApiError,
+  Conversation,
+  ChatMessage,
+  ConversationApiItem,
+  MessageApiItem,
+  SendMessageApiResponse,
+} from '../types/chat';
 
 /**
  * Service to manage all HTTP interactions with the AI Chat Backend.
@@ -8,13 +17,209 @@ class ChatApiService {
     return process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000';
   }
 
+  private get cleanBaseUrl(): string {
+    return this.baseUrl.replace(/\/+$/, '');
+  }
+
+  private formatError(response: Response, defaultMessage: string): ChatApiError {
+    let userFriendlyMessage = defaultMessage;
+
+    if (response.status === 400) {
+      userFriendlyMessage = 'Invalid request. Please check your message.';
+    } else if (response.status === 404) {
+      userFriendlyMessage = 'Conversation or resource not found.';
+    } else if (response.status === 429) {
+      userFriendlyMessage = 'Too many requests. Please wait a moment before trying again.';
+    } else if (response.status === 502 || response.status === 503) {
+      userFriendlyMessage = 'The AI service is temporarily unavailable. Please try again shortly.';
+    } else if (response.status >= 500) {
+      userFriendlyMessage = 'The server encountered an error. Please try again later.';
+    }
+
+    return {
+      message: userFriendlyMessage,
+      statusCode: response.status,
+    };
+  }
+
   /**
-   * Sends a user message to the backend FastAPI /api/chat endpoint.
-   *
-   * @param message Text message to send to the AI
-   * @param signal Optional AbortSignal for request cancellation
-   * @returns Promise with ChatResponse containing the AI reply
-   * @throws ChatApiError on communication or validation failures
+   * Fetch all persistent conversations ordered by newest activity.
+   */
+  async getConversations(): Promise<Conversation[]> {
+    try {
+      const response = await fetch(`${this.cleanBaseUrl}/api/conversations`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+
+      if (!response.ok) {
+        throw this.formatError(response, 'Failed to fetch conversation history.');
+      }
+
+      const data: ConversationApiItem[] = await response.json();
+      return data.map((item) => ({
+        id: item.id,
+        title: item.title,
+        createdAt: new Date(item.created_at),
+        updatedAt: new Date(item.updated_at),
+      }));
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'statusCode' in err && 'message' in err) {
+        throw err;
+      }
+      throw {
+        message: 'Unable to reach the server to load conversations.',
+      } as ChatApiError;
+    }
+  }
+
+  /**
+   * Create a new conversation session.
+   */
+  async createConversation(title?: string): Promise<Conversation> {
+    try {
+      const response = await fetch(`${this.cleanBaseUrl}/api/conversations`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ title }),
+      });
+
+      if (!response.ok) {
+        throw this.formatError(response, 'Failed to create a new conversation.');
+      }
+
+      const item: ConversationApiItem = await response.json();
+      return {
+        id: item.id,
+        title: item.title,
+        createdAt: new Date(item.created_at),
+        updatedAt: new Date(item.updated_at),
+      };
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'statusCode' in err && 'message' in err) {
+        throw err;
+      }
+      throw {
+        message: 'Unable to create new conversation.',
+      } as ChatApiError;
+    }
+  }
+
+  /**
+   * Retrieve all messages in a conversation in chronological order.
+   */
+  async getConversationMessages(conversationId: string): Promise<ChatMessage[]> {
+    try {
+      const response = await fetch(
+        `${this.cleanBaseUrl}/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+        {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        }
+      );
+
+      if (!response.ok) {
+        throw this.formatError(response, 'Failed to retrieve messages.');
+      }
+
+      const data: MessageApiItem[] = await response.json();
+      return data.map((item) => ({
+        id: item.id,
+        conversationId: item.conversation_id,
+        role: item.role as 'user' | 'assistant',
+        content: item.content,
+        createdAt: new Date(item.created_at),
+      }));
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'statusCode' in err && 'message' in err) {
+        throw err;
+      }
+      throw {
+        message: 'Unable to load conversation messages.',
+      } as ChatApiError;
+    }
+  }
+
+  /**
+   * Send a message to an existing conversation and persist user message & assistant reply.
+   */
+  async sendMessageToConversation(
+    conversationId: string,
+    message: string,
+    signal?: AbortSignal
+  ): Promise<SendMessageApiResponse> {
+    const trimmed = message.trim();
+    if (!trimmed) {
+      throw {
+        message: 'Message cannot be empty.',
+        statusCode: 400,
+      } as ChatApiError;
+    }
+
+    try {
+      const response = await fetch(
+        `${this.cleanBaseUrl}/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ message: trimmed }),
+          signal,
+        }
+      );
+
+      if (!response.ok) {
+        throw this.formatError(response, 'Failed to send message.');
+      }
+
+      return await response.json();
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'statusCode' in err && 'message' in err) {
+        throw err;
+      }
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw {
+          message: 'Request was cancelled.',
+        } as ChatApiError;
+      }
+      throw {
+        message: 'Unable to connect to the backend server. Please verify the service is running.',
+      } as ChatApiError;
+    }
+  }
+
+  /**
+   * Delete a conversation by ID.
+   */
+  async deleteConversation(conversationId: string): Promise<void> {
+    try {
+      const response = await fetch(
+        `${this.cleanBaseUrl}/api/conversations/${encodeURIComponent(conversationId)}`,
+        {
+          method: 'DELETE',
+        }
+      );
+
+      if (!response.ok && response.status !== 404) {
+        throw this.formatError(response, 'Failed to delete conversation.');
+      }
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'statusCode' in err && 'message' in err) {
+        throw err;
+      }
+      throw {
+        message: 'Unable to delete conversation.',
+      } as ChatApiError;
+    }
+  }
+
+  /**
+   * Legacy endpoint: Sends message directly to POST /api/chat.
    */
   async sendMessage(message: string, signal?: AbortSignal): Promise<ChatResponse> {
     const trimmed = message.trim();
@@ -25,67 +230,31 @@ class ChatApiService {
       } as ChatApiError;
     }
 
-    const payload: ChatRequest = { message: trimmed };
-    const endpoint = `${this.baseUrl.replace(/\/+$/, '')}/api/chat`;
-
     try {
-      const response = await fetch(endpoint, {
+      const response = await fetch(`${this.cleanBaseUrl}/api/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json',
+          Accept: 'application/json',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ message: trimmed } as ChatRequest),
         signal,
       });
 
       if (!response.ok) {
-        let userFriendlyMessage = 'An unexpected error occurred while communicating with the server.';
-
-        if (response.status === 400) {
-          userFriendlyMessage = 'Invalid message request. Please check your input.';
-        } else if (response.status === 404) {
-          userFriendlyMessage = 'The chat service endpoint could not be found.';
-        } else if (response.status === 429) {
-          userFriendlyMessage = 'Too many requests. Please wait a moment before sending another message.';
-        } else if (response.status === 502 || response.status === 503) {
-          userFriendlyMessage = 'The AI provider is temporarily unavailable. Please try again shortly.';
-        } else if (response.status >= 500) {
-          userFriendlyMessage = 'The server encountered an error. Please try again later.';
-        }
-
-        throw {
-          message: userFriendlyMessage,
-          statusCode: response.status,
-        } as ChatApiError;
+        throw this.formatError(response, 'Failed to get an AI response.');
       }
 
-      const data: ChatResponse = await response.json();
-
-      if (!data || typeof data.reply !== 'string') {
-        throw {
-          message: 'Received an invalid response format from the server.',
-          statusCode: 502,
-        } as ChatApiError;
-      }
-
-      return data;
+      return await response.json();
     } catch (err: unknown) {
-      // If error already formatted as ChatApiError, rethrow it
       if (err && typeof err === 'object' && 'statusCode' in err && 'message' in err) {
         throw err;
       }
-
-      // Handle aborted fetch
       if (err instanceof DOMException && err.name === 'AbortError') {
-        throw {
-          message: 'Request was cancelled.',
-        } as ChatApiError;
+        throw { message: 'Request was cancelled.' } as ChatApiError;
       }
-
-      // Handle network errors (e.g. backend down, CORS blocked, offline)
       throw {
-        message: 'Unable to reach the AI chat server. Please ensure the backend is running.',
+        message: 'Unable to reach the AI chat server.',
       } as ChatApiError;
     }
   }

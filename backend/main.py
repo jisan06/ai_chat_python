@@ -1,11 +1,21 @@
-
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 
+from app.db.session import Base, engine
+from app.routes.conversations import router as conversations_router
+from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.ai_service import AIService
 
-app = FastAPI(title="AI Chat App")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Ensure database tables exist at application startup
+    Base.metadata.create_all(bind=engine)
+    yield
+
+
+app = FastAPI(title="AI Chat App", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -15,15 +25,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount new conversation history router
+app.include_router(conversations_router)
+
 ai_service = AIService()
-
-
-class ChatRequest(BaseModel):
-    message: str
-
-
-class ChatResponse(BaseModel):
-    reply: str
 
 
 @app.get("/")
@@ -33,6 +38,7 @@ def home():
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
+    """Legacy chat endpoint preserved for backwards compatibility."""
     if not request.message.strip():
         raise HTTPException(
             status_code=400,
