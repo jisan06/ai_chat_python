@@ -1,121 +1,276 @@
-# Task: Implement Streaming AI Responses in My Existing AI Chat App
+# AI Chat App
 
-Act as a senior full-stack engineer. Add streaming AI responses to my existing application incrementally, without rebuilding the project.
+A full-stack AI-powered chat application built with Next.js, FastAPI, and Google's Gemini API. This project explores practical AI Engineering concepts, including LLM integration, AI provider abstraction, streaming responses, conversation management, and persistent storage.
 
-## Existing technology stack
+## Features
 
-- Frontend: Next.js App Router, React, TypeScript, Tailwind CSS
-- Backend: FastAPI and Python
-- AI provider: Google Gemini through an existing AIProvider interface, GeminiProvider, provider factory, and AIService
-- Database: SQLite using SQLAlchemy
-- API style: REST
-- Existing functionality: persistent conversations, message history, new chats, conversation switching, and non-streaming chat responses
+- **AI-powered chat:** Generate responses using a hosted large language model.
+- **Streaming responses:** Display AI-generated text progressively as it arrives.
+- **Conversation management:** Create new conversations and switch between existing chats.
+- **Persistent chat history:** Store conversations and messages in SQLite.
+- **Provider abstraction:** Separate AI provider logic from application services to support future integrations.
+- **REST API:** Connect the frontend and backend through HTTP endpoints.
+- **Modular architecture:** Organize code into components, hooks, services, and provider layers.
 
-## Phase 1: Inspect before coding
+## Technology Stack
 
-Inspect the actual project and identify:
-- Existing Gemini provider implementation
-- AIProvider interface
-- AIService
-- Chat history service and database models
-- Existing FastAPI routes and response schemas
-- Frontend chat hook, API service, and message components
-- Installed Gemini SDK version
+| Layer | Technology |
+|---|---|
+| Frontend | Next.js, React, TypeScript, Tailwind CSS |
+| Backend | Python, FastAPI |
+| AI Model | Google Gemini |
+| AI SDK | Google Gen AI SDK |
+| Database | SQLite |
+| ORM | SQLAlchemy |
+| API Style | REST |
+| Streaming | HTTP streaming (SSE, if used by the implementation) |
 
-Present a short implementation plan before making changes.
+## Project Architecture
 
-Do not assume that file paths or method names match a generic template. Reuse the actual existing code and preserve current functionality.
+```text
+ai_chat_app/
+├── backend/
+│   ├── app/
+│   │   ├── providers/
+│   │   ├── services/
+│   │   └── db/
+│   ├── data/
+│   ├── main.py
+│   └── requirements.txt
+│
+├── frontend/
+│   ├── src/
+│   │   ├── app/
+│   │   ├── components/
+│   │   ├── features/
+│   │   └── lib/
+│   └── package.json
+│
+└── README.md
+```
 
-## Phase 2: Implement provider-level streaming
+*This is a simplified overview of the main architectural areas. Refer to the actual project files for the complete structure.*
 
-Extend the provider abstraction with a streaming method that asynchronously yields text chunks.
+## How It Works
 
-Implement this in GeminiProvider using the installed Google Gen AI SDK's supported asynchronous streaming API.
+1. The user sends a message through the Next.js frontend.
+2. FastAPI receives and validates the request.
+3. The AI service delegates generation to the configured AI provider.
+4. The Gemini model generates a response.
+5. The backend streams text chunks to the frontend.
+6. The frontend progressively updates the assistant's message.
+7. The completed response is saved to SQLite alongside the conversation history.
 
-Requirements:
-- Reuse the configured Gemini model and existing API key.
-- Do not expose the API key to the frontend.
-- Keep provider-specific SDK logic inside GeminiProvider.
-- Preserve the existing generate method so non-streaming requests continue to work.
-- Handle provider errors appropriately.
-- Check the installed SDK version and use its actual supported API rather than guessing method names.
+## Getting Started
 
-## Phase 3: Add a streaming REST endpoint
+### Prerequisites
 
-Add a dedicated endpoint such as:
+- Python version compatible with the backend dependencies
+- Node.js and npm
+- A Google Gemini API key
 
-`POST /api/conversations/{conversation_id}/messages/stream`
+### 1. Clone the Repository
 
-Use FastAPI StreamingResponse and a clearly defined streaming format, preferably Server-Sent Events (SSE).
+```bash
+git clone <your-repository-url>
+cd ai_chat_app
+```
 
-The request should contain the user message. The response should send text chunks progressively and finish with an explicit completion event.
+Replace `<your-repository-url>` with your repository URL.
 
-Requirements:
-- Preserve all existing REST endpoints.
-- Reuse existing validation, chat history services, database models, and AI service.
-- Save the user message and final assistant response to the correct conversation.
-- Ensure streamed chunks are not saved as duplicate messages.
-- Handle errors after streaming has begun using a documented SSE error event, because HTTP status codes can no longer be changed reliably after the response starts.
-- Send an explicit completion event when successful.
-- Avoid sending API keys, stack traces, or sensitive exception details.
-- Use a consistent UTF-8 encoding and correctly frame SSE events.
-- Ensure the response is not buffered unnecessarily.
-- Handle client disconnects and close provider streams or other resources where appropriate.
+### 2. Set Up the Backend
 
-Database requirements:
-- Keep the existing SQLite database and stored conversations.
-- Do not reset or recreate the database.
-- Avoid holding a database transaction open during a long AI generation unnecessarily.
-- Define safe behavior if generation fails after the user message has been saved.
-- Do not save an incomplete assistant response as a successful final answer.
+```bash
+cd backend
+python -m venv .venv
+```
 
-## Phase 4: Integrate frontend streaming
+Activate the virtual environment.
 
-Update the existing chat API service and chat hook to consume the streaming endpoint using fetch and the ReadableStream API.
+**Windows — Command Prompt:**
 
-Requirements:
-- Read the response body incrementally.
-- Correctly parse SSE event boundaries, including events split across network chunks.
-- Handle UTF-8 decoding safely.
-- Append incoming text to the active assistant message as it arrives.
-- Show a streaming indicator while the response is in progress.
-- Prevent duplicate submissions.
-- Preserve the active conversation ID and message order.
-- Update the existing assistant message rather than creating a separate message for every chunk.
-- Handle HTTP errors, SSE error events, and unexpected connection failures.
-- Do not leave the UI stuck in a loading state.
-- Allow the user to switch conversations safely without mixing responses between conversations.
-- Handle cancellation or cleanup when appropriate.
-- Refresh the conversation history after successful completion if needed.
+```cmd
+.venv\Scripts\activate.bat
+```
 
-Keep components focused on presentation and keep network logic inside the existing service and hook layers.
+Install dependencies:
 
-## Phase 5: Verification
+```bash
+python -m pip install -r requirements.txt
+```
 
-Run the available lint, type-check, and backend tests.
+### 3. Configure Environment Variables
 
-Verify:
-1. AI text appears before generation is complete.
-2. Chunks are displayed in the correct order.
-3. The final assistant response is stored once in SQLite.
-4. User messages are persisted correctly.
-5. Existing conversations still load after a page refresh.
-6. Switching conversations does not mix messages.
-7. Empty messages are rejected.
-8. Provider failures and interrupted streams do not leave the UI loading forever.
-9. Existing non-streaming endpoints continue working.
-10. The Gemini API key remains exclusively on the backend.
+Create a `.env` file inside the `backend` directory:
 
-Do not claim tests passed unless you actually ran them.
+```env
+AI_PROVIDER=gemini
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=your_supported_gemini_model
+```
 
-## Working rules
+Replace the placeholders with your API key and a Gemini model available to your account.
 
-- Implement in small, reviewable steps.
-- Preserve the existing architecture and code style.
-- Do not introduce GraphQL, PostgreSQL, WebSockets, authentication, or unrelated features.
-- Avoid unnecessary dependencies.
-- Do not overwrite unrelated files.
-- Explain the changed files and how to test the result.
-- Keep the implementation understandable for a developer learning full-stack AI engineering.
+**Security:** Never commit your `.env` file or expose your API key in frontend code.
 
-Start by inspecting the project and proposing the plan. Then implement and verify the feature.
+### 4. Run the Backend
+
+From the `backend` directory, with the virtual environment activated:
+
+```bash
+python -m uvicorn main:app --reload
+```
+
+- Backend: http://127.0.0.1:8000
+- Interactive API documentation: http://127.0.0.1:8000/docs
+
+### 5. Set Up and Run the Frontend
+
+Open another terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open http://localhost:3000 in your browser.
+
+Ensure the frontend's API configuration points to the running backend.
+
+## Database
+
+The application uses SQLite with SQLAlchemy.
+
+**Local database location:**
+
+```text
+backend/data/chat.db
+```
+
+The database stores conversations and their associated messages. The backend initializes the database according to the existing database configuration.
+
+The local database file should remain excluded from Git.
+
+## AI Engineering Concepts
+
+### 1. LLM API Integration
+
+Connected a hosted large language model to the application using the Gemini API.
+
+Concepts learned:
+- LLM inference through an API
+- Prompt and response handling
+- API credentials and environment configuration
+- Provider error handling
+
+### 2. AI Provider Abstraction
+
+Separated provider-specific code from the main application using an AI provider interface, provider implementation, factory, and service layer.
+
+Concepts learned:
+- Abstraction and separation of concerns
+- Interface-based design
+- Factory pattern
+- Maintainable AI service architecture
+
+This approach makes adding other supported providers easier without rewriting the entire application.
+
+### 3. Streaming LLM Responses
+
+Implemented progressive response delivery so users can see generated text before the model finishes producing the complete answer.
+
+Concepts learned:
+- Asynchronous generation
+- HTTP streaming
+- Stream parsing and incremental rendering
+- Completion and error handling
+
+### 4. Conversation Management
+
+Implemented multiple conversations and the ability to switch between them while retaining their message histories.
+
+Concepts learned:
+- Conversation identifiers
+- Message ordering
+- Application state management
+- Persistent conversation history
+
+### 5. Database Persistence
+
+Used SQLite and SQLAlchemy to store conversations and messages.
+
+Concepts learned:
+- Relational data modeling
+- ORM operations
+- Database relationships
+- Transaction management
+- Data persistence across page refreshes
+
+### 6. Full-Stack AI Integration
+
+Integrated the frontend, backend, AI provider, and database into one application.
+
+Concepts learned:
+- REST API design
+- Frontend-backend communication
+- Request validation
+- Asynchronous processing
+- Error handling across application layers
+
+## AI Request Flow
+
+```text
+User
+ |
+ v
+Next.js Frontend
+ |
+ v
+FastAPI REST API
+ |
+ v
+AI Service
+ |
+ v
+AI Provider Interface
+ |
+ v
+Gemini API
+ |
+ v
+Streaming Response
+ |
+ v
+Frontend Updates the Message
+ |
+ v
+Completed Response Saved to SQLite
+```
+
+## Future Improvements
+
+Potential next steps for expanding the project and learning additional AI Engineering concepts:
+
+- Conversation-aware prompting using previous messages
+- Prompt engineering and structured outputs
+- Retrieval-Augmented Generation (RAG)
+- Embeddings and vector databases
+- Document upload and question answering
+- AI tool calling and agents
+- LLM evaluation and monitoring
+- Usage and latency tracking
+- Automated testing and production deployment
+- AI security and rate limiting
+
+## Learning Objectives
+
+This project is designed to develop practical skills in building applications powered by large language models.
+
+The main objectives are to understand how to integrate existing AI models into maintainable software, manage conversational data, stream model responses, and connect AI capabilities with conventional backend and frontend systems.
+
+This project focuses on **AI application engineering**, rather than training a machine learning model from scratch.
+
+## License
+
+No license has been specified yet. Choose an appropriate license before distributing the project publicly.
